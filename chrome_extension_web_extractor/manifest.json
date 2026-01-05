@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "网页信息提取器",
+  "version": "0.1.0",
+  "description": "读取当前网页信息并提取为结构化JSON。",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "网页信息提取器",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "service_worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content_script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
