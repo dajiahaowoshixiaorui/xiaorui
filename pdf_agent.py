@@ -3,7 +3,8 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple         
+from zhipuai import ZhipuAI
 
 
 def extract_text_from_pdf(path: Path, max_pages: Optional[int] = None) -> Tuple[str, Dict[str, Any]]:
@@ -49,7 +50,7 @@ def extract_text_from_pdf(path: Path, max_pages: Optional[int] = None) -> Tuple[
         errors.append(f"pdfplumber: {e}")
 
     raise RuntimeError(
-        "无法解析PDF。请安装以下任一库后重试：pypdf / PyPDF2 / pdfplumber。"
+        "无法解析PDF。请安装以下任一库后重试:pypdf / PyPDF2 / pdfplumber。"
         + (" 解析尝试信息：" + " | ".join(errors) if errors else "")
     )
 
@@ -60,8 +61,6 @@ class ChatGLMClient:
         self.model = model
         self.client = None
         try:
-            from zhipuai import ZhipuAI
-
             if not self.api_key:
                 raise ValueError("ZHIPUAI_API_KEY missing")
             self.client = ZhipuAI(api_key=self.api_key)
@@ -73,7 +72,7 @@ class ChatGLMClient:
 
     def chat(self, messages: List[Dict[str, str]], temperature: float = 0.2) -> str:
         if not self.client:
-            raise RuntimeError("ChatGLM接口不可用：请安装zhipuai并设置ZHIPUAI_API_KEY")
+            raise RuntimeError("ChatGLM接口不可用:请安装zhipuai并设置ZHIPUAI_API_KEY")
         resp = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
@@ -81,9 +80,25 @@ class ChatGLMClient:
         )
         try:
             msg = resp.choices[0].message
+            content = None
             if isinstance(msg, dict):
-                return msg.get("content", "") or ""
-            return getattr(msg, "content", "") or ""
+                content = msg.get("content", None)
+            else:
+                content = getattr(msg, "content", None)
+            if isinstance(content, list):
+                parts = []
+                for it in content:
+                    t = None
+                    if isinstance(it, dict):
+                        t = it.get("text", None) or it.get("content", None)
+                    elif isinstance(it, str):
+                        t = it
+                    if t:
+                        parts.append(str(t))
+                return "\n".join(parts)
+            if isinstance(content, str):
+                return content
+            return str(content or "")
         except Exception:
             return ""
 
@@ -94,32 +109,88 @@ class ExtractOptions:
     max_chars: int = 60000
 
 
+
 def build_extract_messages(text: str) -> List[Dict[str, str]]:
-    sys = "你是文档信息抽取助手，只输出严格JSON，不要输出任何解释文本。"
-    user = (
-        "从以下PDF文本中提取信息，返回JSON，字段固定如下：\n"
-        "doc_title, summary, key_points[], requirements[], entities{organizations[], people[], dates[], numbers[]}\n"
-        "要求：\n"
-        "1) summary用中文，尽量客观，不超过200字\n"
-        "2) key_points最多10条\n"
-        "3) requirements只在文本中明确出现时填写\n"
-        "4) 没有的信息用空字符串/空数组\n"
-        "文本：\n"
-        f"{text}"
-    )
-    return [{"role": "system", "content": sys}, {"role": "user", "content": user}]
+    system_prompt = """你是一名电力系统行业专家,具有10年以上输变电工程设计与运维经验。
+熟悉国家电网、电力行业相关规范与技术标准。
+
+你的任务是：从给定的电力行业文档中，提取结构化工程信息。
+
+【强制规则】
+1. 必须严格按照给定的 JSON 结构返回结果，不得新增、删除或重命名任何字段
+2. 仅当文档中“明确出现”对应信息时才填写
+3. 文档中未出现或无法确定的信息，必须填写 null
+4. 严禁主观推断、猜测或补全
+5. 只输出 JSON,不得包含任何解释性文字
+6. 不要使用 Markdown,不要使用 ``` 包裹
+7. 即使未提取到任何有效信息，也必须返回完整 JSON 结构
+"""
+
+    user_prompt = f"""请从以下 PDF 文本中提取电力工程相关信息。
+
+【输出要求】
+- 输出必须是一个合法的 JSON 对象
+- JSON 结构必须与下方【JSON 模板】完全一致
+- 不得新增字段、不得删除字段、不得修改字段名称
+- 所有未明确出现的信息统一填写 null
+- 数值保持原始单位，不进行换算
+- 文本中的符号、角度、单位需如实保留
+
+【JSON 模板】
+<此处放完整 JSON 模板，不得省略>
+
+【PDF 文本】
+{text}
+"""
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
 
 
 def extract_structured_info_from_pdf(pdf_path: Path, client: ChatGLMClient, opt: ExtractOptions) -> Dict[str, Any]:
     pdf_text, meta = extract_text_from_pdf(pdf_path, max_pages=opt.max_pages)
     pdf_text = pdf_text.strip()
     if not pdf_text:
-        raise RuntimeError("PDF文本为空，可能是扫描件图片PDF，需先OCR后再抽取")
+        raise RuntimeError("PDF文本为空,可能是扫描件图片PDF,需先OCR后再抽取")
     if opt.max_chars and len(pdf_text) > opt.max_chars:
         pdf_text = pdf_text[: opt.max_chars]
     messages = build_extract_messages(pdf_text)
     content = client.chat(messages, temperature=0.1)
-    data = json.loads(content)
+    def _try_json(s: str):
+        try:
+            return json.loads(s)
+        except Exception:
+            pass
+        if "```" in s:
+            parts = s.split("```")
+            for p in parts:
+                p = p.strip()
+                if p.startswith("{") and p.endswith("}"):
+                    try:
+                        return json.loads(p)
+                    except Exception:
+                        continue
+        i = s.find("{")
+        if i != -1:
+            depth = 0
+            for j in range(i, len(s)):
+                ch = s[j]
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = s[i : j + 1]
+                        try:
+                            return json.loads(candidate)
+                        except Exception:
+                            break
+        raise RuntimeError("模型未返回合法JSON，请重试或缩短PDF内容")
+    if not content or not content.strip():
+        raise RuntimeError("模型输出为空，请检查API Key或稍后重试")
+    data = _try_json(content.strip())
     return {
         "extracted": data,
         "source": {
@@ -134,8 +205,8 @@ def main():
     parser = argparse.ArgumentParser(prog="pdf-agent", add_help=True)
     parser.add_argument("--pdf", type=str, required=True)
     parser.add_argument("--model", type=str, default="glm-4-air")
-    parser.add_argument("--max-pages", type=int, default=15)
-    parser.add_argument("--max-chars", type=int, default=60000)
+    parser.add_argument("--max-pages", type=int, default=20)
+    parser.add_argument("--max-chars", type=int, default=80000)
     args = parser.parse_args()
 
     pdf_path = Path(args.pdf)
@@ -158,4 +229,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
