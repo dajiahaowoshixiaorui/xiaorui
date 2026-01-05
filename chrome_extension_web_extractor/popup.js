@@ -4,8 +4,16 @@ const jsonEl = document.getElementById("json");
 const btnExtract = document.getElementById("btnExtract");
 const btnCopy = document.getElementById("btnCopy");
 const btnSave = document.getElementById("btnSave");
+const pdfFileInput = document.getElementById("pdfFile");
+const btnPdf = document.getElementById("btnPdf");
+const btnCompare = document.getElementById("btnCompare");
+const pdfSummaryEl = document.getElementById("pdfSummary");
+const pdfJsonEl = document.getElementById("pdfJson");
+const cmpSummaryEl = document.getElementById("cmpSummary");
+const cmpJsonEl = document.getElementById("cmpJson");
 
 let lastPayload = null;
+let lastPdfPayload = null;
 
 function setStatus(text) {
   statusEl.textContent = text || "";
@@ -41,6 +49,7 @@ function render(payload) {
   jsonEl.textContent = JSON.stringify(payload, null, 2);
   btnCopy.disabled = false;
   btnSave.disabled = false;
+  btnCompare.disabled = !lastPdfPayload;
 }
 
 async function getActiveTab() {
@@ -153,6 +162,12 @@ async function loadLastExtract() {
   return res.payload || null;
 }
 
+async function loadLastPdfExtract() {
+  const res = await chrome.runtime.sendMessage({ type: "GET_LAST_PDF_EXTRACT" });
+  if (!res || res.ok !== true) return null;
+  return res.payload || null;
+}
+
 async function copyJson() {
   if (!lastPayload) return;
   const text = JSON.stringify(lastPayload, null, 2);
@@ -172,6 +187,56 @@ function saveJson() {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+function renderPdf(payload) {
+  lastPdfPayload = payload;
+  if (!payload) {
+    pdfSummaryEl.innerHTML = `<div class="muted">PDF 暂无数据</div>`;
+    pdfJsonEl.textContent = "";
+    btnCompare.disabled = !lastPayload;
+    return;
+  }
+  const info = payload.source || {};
+  pdfSummaryEl.innerHTML = `
+    <div><span class="muted">文件：</span>${(info.file || "-")}</div>
+    <div><span class="muted">页数：</span>${(info.page_count ?? "-")}（使用${info.library || "-"}, 读取${info.used_pages ?? "-" }页）</div>
+  `;
+  pdfJsonEl.textContent = JSON.stringify(payload.extracted || payload, null, 2);
+  btnCompare.disabled = !lastPayload;
+}
+
+function normalizeTitle(s) {
+  return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function comparePageAndPdf(page, pdf) {
+  const out = { title_match: false, title_similarity: 0, points_in_page: [] };
+  const pageTitle = normalizeTitle(page?.title);
+  const pdfTitle = normalizeTitle(pdf?.extracted?.doc_title);
+  out.title_match = pageTitle && pdfTitle && pageTitle === pdfTitle;
+  if (pageTitle && pdfTitle) {
+    const a = pageTitle.split(" ");
+    const b = pdfTitle.split(" ");
+    const inter = a.filter((x) => b.includes(x));
+    out.title_similarity = Math.round((inter.length / Math.max(a.length, 1)) * 100);
+  }
+  const textSample = String(page?.textSample || "");
+  const points = Array.isArray(pdf?.extracted?.key_points) ? pdf.extracted.key_points : [];
+  for (const p of points) {
+    const hit = typeof p === "string" && p.length > 0 && textSample.includes(p);
+    out.points_in_page.push({ point: p, found_in_page_textSample: !!hit });
+  }
+  return out;
+}
+
+function renderCompare(page, pdf) {
+  const report = comparePageAndPdf(page, pdf);
+  cmpSummaryEl.innerHTML = `
+    <div><span class="muted">标题一致：</span>${report.title_match ? "是" : "否"}</div>
+    <div><span class="muted">标题相似度：</span>${report.title_similarity}%</div>
+  `;
+  cmpJsonEl.textContent = JSON.stringify(report, null, 2);
 }
 
 btnExtract.addEventListener("click", async () => {
@@ -207,6 +272,46 @@ btnSave.addEventListener("click", () => {
   }
 });
 
+pdfFileInput.addEventListener("change", () => {
+  btnPdf.disabled = !(pdfFileInput.files && pdfFileInput.files[0]);
+});
+
+btnPdf.addEventListener("click", async () => {
+  setStatus("PDF提取中...");
+  btnPdf.disabled = true;
+  try {
+    const f = pdfFileInput.files && pdfFileInput.files[0];
+    if (!f) throw new Error("请先选择PDF文件");
+    const url = `http://127.0.0.1:8765/extract?max_pages=${encodeURIComponent(20)}&max_chars=${encodeURIComponent(
+      80000
+    )}`;
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/pdf" },
+      body: f,
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const payload = await r.json();
+    renderPdf(payload);
+    try {
+      await chrome.runtime.sendMessage({ type: "SAVE_PDF_EXTRACT", payload });
+    } catch {}
+    setStatus("PDF提取完成");
+  } catch (e) {
+    setStatus(String(e && e.message ? e.message : e));
+  } finally {
+    btnPdf.disabled = false;
+  }
+});
+
+btnCompare.addEventListener("click", () => {
+  if (!lastPayload || !lastPdfPayload) {
+    setStatus("请先提取网页与PDF");
+    return;
+  }
+  renderCompare(lastPayload, lastPdfPayload);
+});
+
 loadLastExtract()
   .then((payload) => {
     render(payload);
@@ -214,4 +319,12 @@ loadLastExtract()
   })
   .catch(() => {
     render(null);
+  });
+
+loadLastPdfExtract()
+  .then((payload) => {
+    renderPdf(payload);
+  })
+  .catch(() => {
+    renderPdf(null);
   });

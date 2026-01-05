@@ -34,6 +34,7 @@
         display: flex;
         gap: 8px;
         margin-bottom: 10px;
+        flex-wrap: wrap;
       }
       button {
         padding: 8px 10px;
@@ -61,11 +62,18 @@
         max-height: 320px;
         overflow: auto;
         font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+        max-width: 100%;
+        box-sizing: border-box;
       }
       .kv {
         font-size: 12px;
         margin-bottom: 8px;
         color: #222;
+        word-break: break-word;
+        overflow-wrap: anywhere;
       }
       .kv div {
         margin: 3px 0;
@@ -81,9 +89,18 @@
       <button id="btnCopy" disabled>复制JSON</button>
       <button id="btnSave" disabled>保存文件</button>
     </div>
+    <div class="row">
+      <input type="file" id="pdfFile" accept="application/pdf" />
+      <button id="btnPdf" disabled>提取PDF</button>
+      <button id="btnCompare" disabled>对比网页与PDF</button>
+    </div>
     <div class="status" id="status"></div>
     <div class="kv" id="summary"></div>
     <pre id="json"></pre>
+    <div class="kv" id="pdfSummary"></div>
+    <pre id="pdfJson"></pre>
+    <div class="kv" id="cmpSummary"></div>
+    <pre id="cmpJson"></pre>
     <script src="popup.js"></script>
   </body>
 </html>
