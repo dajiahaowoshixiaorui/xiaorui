@@ -156,9 +156,9 @@ def ensure_sql_valid(sql: str) -> None:
 def execute_sql(sql: str) -> List[Dict]:
     host = os.environ.get("MYSQL_HOST", "localhost")
     port = int(os.environ.get("MYSQL_PORT", "3306"))
-    user = os.environ.get("MYSQL_USER", "root")
-    password = os.environ.get("MYSQL_PASSWORD", "123456")
-    database = os.environ.get("MYSQL_DATABASE", "school")
+    user = os.environ.get("MYSQL_USER", "")
+    password = os.environ.get("MYSQL_PASSWORD", "")
+    database = os.environ.get("MYSQL_DATABASE", "")
     missing = []
     for k, v in [("MYSQL_HOST", host), ("MYSQL_USER", user), ("MYSQL_PASSWORD", password)]:
         if not v:
