@@ -6,10 +6,10 @@ from typing import List, Dict
 from mysql.connector import connect, Error
 
 ALLOWED_FIELDS = {
-    "student_id",
-    "name",
-    "gender",
-    "age",
+    "student_id",   # 主键
+    "name",         #必填字段
+    "gender",       #必填字段
+    "age",          #选填字段
     "class_id",
     "enroll_date",
     "系统名称",
@@ -50,8 +50,8 @@ def chatglm_generate_sql(prompt: str) -> str:
         raise RuntimeError("缺少zhipuai依赖") from e
     client = ZhipuAI(api_key=api_key)
     system_prompt = (
-        "你是一个数据库助理，只返回针对MySQL students表的SELECT语句。"
-        "只使用以下字段：student_id, name, gender, age, class_id, enroll_date, 系统名称, 功能模块, 图片, 字段分组, 字段名, 对接厂商, 数据中心。"
+        "你是一个数据库助理,只返回针对MySQL students表的SELECT语句。"
+        "只使用以下字段:student_id, name, gender, age, class_id, enroll_date, 系统名称, 功能模块, 图片, 字段分组, 字段名, 对接厂商, 数据中心。"
         "字段名保持原样，中文字段名需用反引号。如：`系统名称`。不要返回除SQL之外的任何文字。"
         "表名必须是students。不得使用*。只输出一行SQL。"
     )
